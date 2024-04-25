@@ -32,11 +32,13 @@ type lookupEntry struct {
 
 type GeoIP struct {
 	DBPath  string          `toml:"db_path"`
+	DBType  string          `toml:"db_type"`
 	Lookups []lookupEntry   `toml:"lookup"`
 	Log     telegraf.Logger `toml:"-"`
 }
 
-var reader *geoip2.CityReader
+var cityReader *geoip2.CityReader
+var countryReader *geoip2.CountryReader
 
 func (g *GeoIP) SampleConfig() string {
 	return sampleConfig
@@ -51,26 +53,40 @@ func (g *GeoIP) Apply(metrics ...telegraf.Metric) []telegraf.Metric {
 		for _, lookup := range g.Lookups {
 			if lookup.Field != "" {
 				if value, ok := point.GetField(lookup.Field); ok {
-					record, err := reader.Lookup(net.ParseIP(value.(string)))
-					if err != nil {
-						if err.Error() != "not found"{
-							g.Log.Errorf("GeoIP lookup error: %v", err)
-						}						
-						continue
+					if g.DBType == "city" || g.DBType == "" {
+						record, err := cityReader.Lookup(net.ParseIP(value.(string)))
+						if err != nil {
+							if err.Error() != "not found" {
+								g.Log.Errorf("GeoIP lookup error: %v", err)
+							}
+							continue
+						}
+						if len(lookup.DestCountry) > 0 {
+							point.AddField(lookup.DestCountry, record.Country.ISOCode)
+						}
+						if len(lookup.DestCity) > 0 {
+							point.AddField(lookup.DestCity, record.City.Names["en"])
+						}
+						if len(lookup.DestLat) > 0 {
+							point.AddField(lookup.DestLat, record.Location.Latitude)
+						}
+						if len(lookup.DestLon) > 0 {
+							point.AddField(lookup.DestLon, record.Location.Longitude)
+						}
+					} else if g.DBType == "country" {
+						record, err := countryReader.Lookup(net.ParseIP(value.(string)))
+						if err != nil {
+							if err.Error() != "not found" {
+								g.Log.Errorf("GeoIP lookup error: %v", err)
+							}
+							continue
+						}
+						if len(lookup.DestCountry) > 0 {
+							point.AddField(lookup.DestCountry, record.Country.ISOCode)
+						}
+					} else {
+						g.Log.Errorf("Invalid GeoIP database type specified: %s", g.DBType)
 					}
-					if len(lookup.DestCountry) > 0 {
-						point.AddField(lookup.DestCountry, record.Country.ISOCode)
-					}
-					if len(lookup.DestCity) > 0 {
-						point.AddField(lookup.DestCity, record.City.Names["en"])
-					}
-					if len(lookup.DestLat) > 0 {
-						point.AddField(lookup.DestLat, record.Location.Latitude)
-					}
-					if len(lookup.DestLon) > 0 {
-						point.AddField(lookup.DestLon, record.Location.Longitude)
-					}
-
 				}
 			}
 		}
@@ -79,11 +95,22 @@ func (g *GeoIP) Apply(metrics ...telegraf.Metric) []telegraf.Metric {
 }
 
 func (g *GeoIP) Init() error {
-	r, err := geoip2.NewCityReaderFromFile(g.DBPath)
-	if err != nil {
-		return fmt.Errorf("Error opening GeoIP database: %v", err)
+	if g.DBType == "city" || g.DBType == "" {
+		r, err := geoip2.NewCityReaderFromFile(g.DBPath)
+		if err != nil {
+			return fmt.Errorf("Error opening GeoIP database: %v", err)
+		} else {
+			cityReader = r
+		}
+	} else if g.DBType == "country" {
+		r, err := geoip2.NewCountryReaderFromFile(g.DBPath)
+		if err != nil {
+			return fmt.Errorf("Error opening GeoIP database: %v", err)
+		} else {
+			countryReader = r
+		}
 	} else {
-		reader = r
+		return fmt.Errorf("Invalid GeoIP database type specified: %s", g.DBType)
 	}
 	return nil
 }
