@@ -25,4 +25,4 @@ As specified above, the plugin uses a separate configuration file, where you can
 
 # License
 
-This software is licensed under GPL 3.0.
+This software is licensed under the MIT license.
