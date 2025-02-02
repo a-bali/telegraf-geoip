@@ -12,6 +12,7 @@ import (
 const sampleConfig = `
   ## db_path is the location of the MaxMind GeoIP2 City database
   db_path = "/var/lib/GeoIP/GeoLite2-City.mmdb"
+  # db_type = "city" # city, country or asn (default: city)
 
   [[processors.geoip.lookup]
 	# get the ip from the field "source_ip" and put the lookup results in the respective destination fields (if specified)
@@ -20,14 +21,21 @@ const sampleConfig = `
 	dest_city = "source_city"
 	dest_lat = "source_lat"
 	dest_lon = "source_lon"
+	# from the ASN database
+	dest_autonomous_system_organization = "source_autonomous_system_organization"
+	dest_autonomous_system_number = "source_autonomous_system_number"
+	dest_network = "source_network"
   `
 
 type lookupEntry struct {
-	Field       string `toml:"field"`
-	DestCountry string `toml:"dest_country"`
-	DestCity    string `toml:"dest_city"`
-	DestLat     string `toml:"dest_lat"`
-	DestLon     string `toml:"dest_lon"`
+	Field                            string `toml:"field"`
+	DestCountry                      string `toml:"dest_country"`
+	DestCity                         string `toml:"dest_city"`
+	DestLat                          string `toml:"dest_lat"`
+	DestLon                          string `toml:"dest_lon"`
+	DestAutonomousSystemOrganization string `toml:"dest_autonomous_system_organization"`
+	DestAutonomousSystemNumber       string `toml:"dest_autonomous_system_number"`
+	DestNetwork                      string `toml:"dest_network"`
 }
 
 type GeoIP struct {
@@ -39,6 +47,7 @@ type GeoIP struct {
 
 var cityReader *geoip2.CityReader
 var countryReader *geoip2.CountryReader
+var ASNReader *geoip2.ASNReader
 
 func (g *GeoIP) SampleConfig() string {
 	return sampleConfig
@@ -84,6 +93,23 @@ func (g *GeoIP) Apply(metrics ...telegraf.Metric) []telegraf.Metric {
 						if len(lookup.DestCountry) > 0 {
 							point.AddField(lookup.DestCountry, record.Country.ISOCode)
 						}
+					} else if g.DBType == "asn" {
+						record, err := ASNReader.Lookup(net.ParseIP(value.(string)))
+						if err != nil {
+							if err.Error() != "not found" {
+								g.Log.Errorf("GeoIP lookup error: %v", err)
+							}
+							continue
+						}
+						if len(lookup.DestAutonomousSystemNumber) > 0 {
+							point.AddField(lookup.DestAutonomousSystemNumber, record.AutonomousSystemNumber)
+						}
+						if len(lookup.DestAutonomousSystemOrganization) > 0 {
+							point.AddField(lookup.DestAutonomousSystemOrganization, record.AutonomousSystemOrganization)
+						}
+						if len(lookup.DestNetwork) > 0 {
+							point.AddField(lookup.DestNetwork, record.Network)
+						}
 					} else {
 						g.Log.Errorf("Invalid GeoIP database type specified: %s", g.DBType)
 					}
@@ -108,6 +134,13 @@ func (g *GeoIP) Init() error {
 			return fmt.Errorf("Error opening GeoIP database: %v", err)
 		} else {
 			countryReader = r
+		}
+	} else if g.DBType == "asn" {
+		r, err := geoip2.NewASNReaderFromFile(g.DBPath)
+		if err != nil {
+			return fmt.Errorf("Error opening GeoIP database: %v", err)
+		} else {
+			ASNReader = r
 		}
 	} else {
 		return fmt.Errorf("Invalid GeoIP database type specified: %s", g.DBType)

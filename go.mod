@@ -5,7 +5,7 @@ go 1.22.0
 toolchain go1.22.1
 
 require (
-	github.com/IncSW/geoip2 v0.1.2
+	github.com/IncSW/geoip2 v0.1.3
 	github.com/influxdata/telegraf v1.31.0
 )
 
